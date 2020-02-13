@@ -169,13 +169,14 @@ type Call struct {
 }
 
 func (call *Call) done() {
-	select {
-	case call.Done <- call:
-		// ok
-	default:
-		log.Debug("rpc: discarding Call reply due to insufficient Done chan capacity")
-
-	}
+	call.Done <- call
+	//select {
+	//case call.Done <- call:
+	//	// ok
+	//default:
+	//	log.Debug("rpc: discarding Call reply due to insufficient Done chan capacity")
+	//
+	//}
 }
 
 // RegisterServerMessageChan registers the channel that receives server requests.
