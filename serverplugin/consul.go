@@ -32,6 +32,7 @@ type ConsulRegisterPlugin struct {
 	Metrics  metrics.Registry
 	// Registered services
 	Services       []string
+	servicesLock	sync.RWMutex
 	metasLock      sync.RWMutex
 	metas          map[string]string
 	UpdateInterval time.Duration
@@ -90,6 +91,7 @@ func (p *ConsulRegisterPlugin) Start() error {
 					}
 
 					//set this same metrics for all services at this server
+					p.servicesLock.RLock()
 					for _, name := range p.Services {
 						nodePath := fmt.Sprintf("%s/%s/%s", p.BasePath, name, p.ServiceAddress)
 						kvPaire, err := p.kv.Get(nodePath)
@@ -110,6 +112,7 @@ func (p *ConsulRegisterPlugin) Start() error {
 							p.kv.Put(nodePath, []byte(v.Encode()), &store.WriteOptions{TTL: p.UpdateInterval * 3})
 						}
 					}
+					p.servicesLock.RUnlock()
 				}
 			}
 		}()
@@ -201,7 +204,9 @@ func (p *ConsulRegisterPlugin) Register(name string, rcvr interface{}, metadata 
 		return err
 	}
 
+	p.servicesLock.Lock()
 	p.Services = append(p.Services, name)
+	p.servicesLock.Unlock()
 
 	p.metasLock.Lock()
 	if p.metas == nil {

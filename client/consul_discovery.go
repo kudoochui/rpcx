@@ -21,6 +21,7 @@ type ConsulDiscovery struct {
 	basePath string
 	kv       store.Store
 	pairs    []*KVPair
+	pairsLock 	 sync.RWMutex
 	chans    []chan []*KVPair
 	mu       sync.Mutex
 	// -1 means it always retry to watch until zookeeper is ok, 0 means no retry.
@@ -108,6 +109,8 @@ func (d *ConsulDiscovery) SetFilter(filter ServiceDiscoveryFilter) {
 
 // GetServices returns the servers
 func (d *ConsulDiscovery) GetServices() []*KVPair {
+	d.pairsLock.RLock()
+	defer d.pairsLock.RUnlock()
 	return d.pairs
 }
 
@@ -136,6 +139,7 @@ func (d *ConsulDiscovery) RemoveWatcher(ch chan []*KVPair) {
 
 	d.chans = chans
 }
+
 func (d *ConsulDiscovery) watch() {
 	for {
 		var err error
@@ -190,7 +194,9 @@ func (d *ConsulDiscovery) watch() {
 					}
 					pairs = append(pairs, pair)
 				}
+				d.pairsLock.Lock()
 				d.pairs = pairs
+				d.pairsLock.Unlock()
 
 				d.mu.Lock()
 				for _, ch := range d.chans {
