@@ -21,6 +21,7 @@ type EtcdDiscovery struct {
 	basePath string
 	kv       store.Store
 	pairs    []*KVPair
+	pairsLock 	 sync.RWMutex
 	chans    []chan []*KVPair
 	mu       sync.Mutex
 
@@ -116,6 +117,8 @@ func (d *EtcdDiscovery) SetFilter(filter ServiceDiscoveryFilter) {
 
 // GetServices returns the servers
 func (d *EtcdDiscovery) GetServices() []*KVPair {
+	d.pairsLock.RLock()
+	defer d.pairsLock.RUnlock()
 	return d.pairs
 }
 
@@ -213,7 +216,9 @@ func (d *EtcdDiscovery) watch() {
 					}
 					pairs = append(pairs, pair)
 				}
+				d.pairsLock.Lock()
 				d.pairs = pairs
+				d.pairsLock.Unlock()
 
 				d.mu.Lock()
 				for _, ch := range d.chans {

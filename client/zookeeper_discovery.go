@@ -21,6 +21,7 @@ type ZookeeperDiscovery struct {
 	basePath string
 	kv       store.Store
 	pairs    []*KVPair
+	pairsLock 	 sync.RWMutex
 	chans    []chan []*KVPair
 	mu       sync.Mutex
 
@@ -111,6 +112,8 @@ func (d *ZookeeperDiscovery) SetFilter(filter ServiceDiscoveryFilter) {
 
 // GetServices returns the servers
 func (d *ZookeeperDiscovery) GetServices() []*KVPair {
+	d.pairsLock.RLock()
+	defer d.pairsLock.RUnlock()
 	return d.pairs
 }
 
@@ -195,7 +198,9 @@ func (d *ZookeeperDiscovery) watch() {
 					}
 					pairs = append(pairs, pair)
 				}
+				d.pairsLock.Lock()
 				d.pairs = pairs
+				d.pairsLock.Unlock()
 
 				d.mu.Lock()
 				for _, ch := range d.chans {
