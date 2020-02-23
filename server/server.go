@@ -202,6 +202,21 @@ func (s *Server) Serve(network, address string) (err error) {
 	return s.serveListener(ln)
 }
 
+// ServeListener listens RPC requests.
+// It is blocked until receiving connectings from clients.
+func (s *Server) ServeListener(network string, ln net.Listener) (err error) {
+	s.startShutdownListener()
+	if network == "http" {
+		s.serveByHTTP(ln, "")
+		return nil
+	}
+
+	// try to start gateway
+	ln = s.startGateway(network, ln)
+
+	return s.serveListener(ln)
+}
+
 // serveListener accepts incoming connections on the Listener ln,
 // creating a new service goroutine for each.
 // The service goroutines read requests and then call services to reply to them.
@@ -236,6 +251,10 @@ func (s *Server) serveListener(ln net.Listener) error {
 				log.Errorf("rpcx: Accept error: %v; retrying in %v", e, tempDelay)
 				time.Sleep(tempDelay)
 				continue
+			}
+
+			if strings.Contains(e.Error(), "listener closed") {
+				return ErrServerClosed
 			}
 			return e
 		}
