@@ -16,8 +16,8 @@ import (
 	"github.com/juju/ratelimit"
 	ex "github.com/smallnest/rpcx/errors"
 	"github.com/smallnest/rpcx/protocol"
-	"github.com/smallnest/rpcx/serverplugin"
 	"github.com/smallnest/rpcx/share"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -85,6 +85,8 @@ type xClient struct {
 	servers   map[string]string
 	discovery ServiceDiscovery
 	selector  Selector
+
+	slGroup singleflight.Group
 
 	isShutdown bool
 
@@ -230,7 +232,11 @@ func filterByStateAndGroup(group string, servers map[string]string) {
 // selects a client from candidates base on c.selectMode
 func (c *xClient) selectClient(ctx context.Context, servicePath, serviceMethod string, args interface{}) (string, RPCClient, error) {
 	c.mu.Lock()
-	k := c.selector.Select(ctx, servicePath, serviceMethod, args)
+	var fn = c.selector.Select
+	if c.Plugins != nil {
+		fn = c.Plugins.DoWrapSelect(fn)
+	}
+	k := fn(ctx, servicePath, serviceMethod, args)
 	c.mu.Unlock()
 	if k == "" {
 		return "", nil, ErrXClientNoServer
@@ -243,13 +249,17 @@ func (c *xClient) getCachedClient(k string) (RPCClient, error) {
 	// TODO: improve the lock
 	var client RPCClient
 	var needCallPlugin bool
-	c.mu.Lock()
 	defer func() {
 		if needCallPlugin {
 			c.Plugins.DoClientConnected((client.(*Client)).Conn)
 		}
 	}()
+	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.isShutdown {
+		return nil, errors.New("this xclient is closed")
+	}
 
 	breaker, ok := c.breakers.Load(k)
 	if ok && !breaker.(Breaker).Ready() {
@@ -271,22 +281,15 @@ func (c *xClient) getCachedClient(k string) (RPCClient, error) {
 		if network == "inprocess" {
 			client = InprocessClient
 		} else {
-			client = &Client{
-				option:  c.option,
-				Plugins: c.Plugins,
-			}
-
-			var breaker interface{}
-			if c.option.GenBreaker != nil {
-				breaker, _ = c.breakers.LoadOrStore(k, c.option.GenBreaker())
-			}
-			err := client.Connect(network, addr)
+			generatedClient, err, _ := c.slGroup.Do(k, func() (interface{}, error) {
+				return c.generateClient(k, network, addr)
+			})
+			c.slGroup.Forget(k)
 			if err != nil {
-				if breaker != nil {
-					breaker.(Breaker).Fail()
-				}
 				return nil, err
 			}
+
+			client = generatedClient.(RPCClient)
 			if c.Plugins != nil {
 				needCallPlugin = true
 			}
@@ -298,6 +301,27 @@ func (c *xClient) getCachedClient(k string) (RPCClient, error) {
 	}
 
 	return client, nil
+}
+
+func (c *xClient) generateClient(k, network, addr string) (client RPCClient, err error) {
+
+	client = &Client{
+		option:  c.option,
+		Plugins: c.Plugins,
+	}
+
+	var breaker interface{}
+	if c.option.GenBreaker != nil {
+		breaker, _ = c.breakers.LoadOrStore(k, c.option.GenBreaker())
+	}
+	err = client.Connect(network, addr)
+	if err != nil {
+		if breaker != nil {
+			breaker.(Breaker).Fail()
+		}
+		return nil, err
+	}
+	return client, err
 }
 
 func (c *xClient) getCachedClientWithoutLock(k string) (RPCClient, error) {
@@ -816,12 +840,12 @@ func (c *xClient) SendFile(ctx context.Context, fileName string, rateInBytesPerS
 		return err
 	}
 
-	args := serverplugin.FileTransferArgs{
+	args := share.FileTransferArgs{
 		FileName: fi.Name(),
 		FileSize: fi.Size(),
 	}
 
-	reply := &serverplugin.FileTransferReply{}
+	reply := &share.FileTransferReply{}
 	err = c.Call(ctx, "TransferFile", args, reply)
 	if err != nil {
 		return err
@@ -880,11 +904,11 @@ loop:
 }
 
 func (c *xClient) DownloadFile(ctx context.Context, requestFileName string, saveTo io.Writer) error {
-	args := serverplugin.DownloadFileArgs{
+	args := share.DownloadFileArgs{
 		FileName: requestFileName,
 	}
 
-	reply := &serverplugin.FileTransferReply{}
+	reply := &share.FileTransferReply{}
 	err := c.Call(ctx, "DownloadFile", args, reply)
 	if err != nil {
 		return err
@@ -932,10 +956,9 @@ loop:
 
 // Close closes this client and its underlying connnections to services.
 func (c *xClient) Close() error {
-	c.isShutdown = true
-
 	var errs []error
 	c.mu.Lock()
+	c.isShutdown = true
 	for k, v := range c.cachedClient {
 		e := v.Close()
 		if e != nil {
@@ -949,9 +972,7 @@ func (c *xClient) Close() error {
 
 	go func() {
 		defer func() {
-			if r := recover(); r != nil {
-
-			}
+			recover()
 		}()
 
 		c.discovery.RemoveWatcher(c.ch)

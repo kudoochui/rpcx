@@ -58,7 +58,7 @@ func NewEtcdV3DiscoveryStore(basePath string, kv store.Store) ServiceDiscovery {
 		log.Errorf("cannot get services of from registry: %v, err: %v", basePath, err)
 		panic(err)
 	}
-	var pairs = make([]*KVPair, 0, len(ps))
+	pairs := make([]*KVPair, 0, len(ps))
 	var prefix string
 	for _, p := range ps {
 		if prefix == "" {
@@ -152,6 +152,11 @@ func (d *EtcdV3Discovery) RemoveWatcher(ch chan []*KVPair) {
 }
 
 func (d *EtcdV3Discovery) watch() {
+	defer func() {
+		d.kv.Close()
+	}()
+
+rewatch:
 	for {
 		var err error
 		var c <-chan []*store.KVPair
@@ -184,7 +189,6 @@ func (d *EtcdV3Discovery) watch() {
 			return
 		}
 
-	readChanges:
 		for {
 			select {
 			case <-d.stopCh:
@@ -192,7 +196,8 @@ func (d *EtcdV3Discovery) watch() {
 				return
 			case ps := <-c:
 				if ps == nil {
-					break readChanges
+					log.Warnf("rewatch %s", d.basePath)
+					goto rewatch
 				}
 				var pairs []*KVPair // latest servers
 				var prefix string
@@ -232,9 +237,7 @@ func (d *EtcdV3Discovery) watch() {
 					ch := ch
 					go func() {
 						defer func() {
-							if r := recover(); r != nil {
-
-							}
+							recover()
 						}()
 
 						select {

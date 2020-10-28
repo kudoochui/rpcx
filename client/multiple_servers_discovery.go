@@ -30,7 +30,6 @@ func (d *MultipleServersDiscovery) Clone(servicePath string) ServiceDiscovery {
 
 // SetFilter sets the filer.
 func (d *MultipleServersDiscovery) SetFilter(filter ServiceDiscoveryFilter) {
-
 }
 
 // GetServices returns the configured server
@@ -73,9 +72,7 @@ func (d *MultipleServersDiscovery) Update(pairs []*KVPair) {
 		ch := ch
 		go func() {
 			defer func() {
-				if r := recover(); r != nil {
-
-				}
+				recover()
 			}()
 			select {
 			case ch <- pairs:
@@ -87,5 +84,4 @@ func (d *MultipleServersDiscovery) Update(pairs []*KVPair) {
 }
 
 func (d *MultipleServersDiscovery) Close() {
-
 }

@@ -4,6 +4,18 @@ Official site: [http://rpcx.io](http://rpcx.io/)
 
 [![License](https://img.shields.io/:license-apache%202-blue.svg)](https://opensource.org/licenses/Apache-2.0) [![GoDoc](https://godoc.org/github.com/smallnest/rpcx?status.png)](http://godoc.org/github.com/smallnest/rpcx)  [![travis](https://travis-ci.org/smallnest/rpcx.svg?branch=master)](https://travis-ci.org/smallnest/rpcx) [![Go Report Card](https://goreportcard.com/badge/github.com/smallnest/rpcx)](https://goreportcard.com/report/github.com/smallnest/rpcx) [![coveralls](https://coveralls.io/repos/smallnest/rpcx/badge.svg?branch=master&service=github)](https://coveralls.io/github/smallnest/rpcx?branch=master) [![QQ2群](https://img.shields.io/:QQ2群-670248151-blue.svg)](_documents/rpcx_dev_qq2.png) [![QQ群(已满)](https://img.shields.io/:QQ群(已满)-398044387-blue.svg)](_documents/rpcx_dev_qq.png) 
 
+
+**Notice: etcd/grpc problem**
+
+`etcd` still has some problems if you use go module, please add the below line in your go.mod:
+```
+replace google.golang.org/grpc => google.golang.org/grpc v1.29.0
+```
+Will remove etcd plugin into an indenpendent project in future.
+
+`etcd`一直不是很好的支持go module方式，尤其是和grpc的版本兼容问题，至少目前的rpcx可以通过在你的go.mod中加入以上一行上面解决依赖问题。
+
+
 ## Announce
 
 A tcpdump-like tool added: [rpcxdump](https://github.com/smallnest/rpcxdump)。 You can use it to debug communications between rpcx services and clients.
@@ -14,7 +26,7 @@ A tcpdump-like tool added: [rpcxdump](https://github.com/smallnest/rpcxdump)。 
 ## Cross-Languages
 you can use other programming languages besides Go to access rpcx services.
 
-- **rpcx-gateway**: You can write clients in any programming languages to call rpcx services via [rpcx-gateway](https://github.com/rpcx-ecosystem/rpcx-gateway)
+- **rpcx-gateway**: You can write clients in any programming languages to call rpcx services via [rpcx-gateway](https://github.com/rpcxio/rpcx-gateway)
 - **http invoke**: you can use the same http requests to access rpcx gateway
 - **Java Services/Clients**: You can use [rpcx-java](https://github.com/smallnest/rpcx-java) to implement/access rpcx servies via raw protocol.
 
@@ -25,13 +37,13 @@ you can use other programming languages besides Go to access rpcx services.
 
 install the basic features:
 
-`go get -u -v github.com/smallnest/rpcx/...`
+`go get -v github.com/smallnest/rpcx/...`
 
 
 If you want to use `ping`、`quic`、`kcp`、`utp` registry, use those tags to `go get` 、 `go build` or `go run`. For example, if you want to use all features, you can:
 
 ```sh
-go get -u -v -tags "quic kcp ping utp" github.com/smallnest/rpcx/...
+go get -v -tags "quic kcp ping utp" github.com/smallnest/rpcx/...
 ```
 
 **_tags_**:
@@ -115,7 +127,7 @@ The benchmark code is at [rpcx-benchmark](https://github.com/rpcx-ecosystem/rpcx
 
 ## Examples
 
-You can find all examples at [rpcx-ecosystem/rpcx-examples3](https://github.com/rpcx-ecosystem/rpcx-examples3).
+You can find all examples at [rpcxio/rpcx-examples](https://github.com/rpcxio/rpcx-examples).
 
 The below is a simple example.
 

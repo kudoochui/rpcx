@@ -46,11 +46,8 @@ func (c *Client) Connect(network, address string) error {
 	}
 
 	if err == nil && conn != nil {
-		if c.option.ReadTimeout != 0 {
-			conn.SetReadDeadline(time.Now().Add(c.option.ReadTimeout))
-		}
-		if c.option.WriteTimeout != 0 {
-			conn.SetWriteDeadline(time.Now().Add(c.option.WriteTimeout))
+		if c.option.IdleTimeout != 0 {
+			conn.SetDeadline(time.Now().Add(c.option.IdleTimeout))
 		}
 
 		if c.Plugins != nil {
@@ -108,6 +105,9 @@ func newDirectConn(c *Client, network, address string) (net.Conn, error) {
 var connected = "200 Connected to rpcx"
 
 func newDirectHTTPConn(c *Client, network, address string) (net.Conn, error) {
+	if c == nil {
+		return nil, errors.New("empty client")
+	}
 	path := c.option.RPCPath
 	if path == "" {
 		path = share.DefaultRPCPath
@@ -117,7 +117,7 @@ func newDirectHTTPConn(c *Client, network, address string) (net.Conn, error) {
 	var tlsConn *tls.Conn
 	var err error
 
-	if c != nil && c.option.TLSConfig != nil {
+	if c.option.TLSConfig != nil {
 		dialer := &net.Dialer{
 			Timeout: c.option.ConnectTimeout,
 		}

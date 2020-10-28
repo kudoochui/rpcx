@@ -26,12 +26,16 @@ type PluginContainer interface {
 	DoPostReadRequest(ctx context.Context, r *protocol.Message, e error) error
 
 	DoPreHandleRequest(ctx context.Context, req *protocol.Message) error
+	DoPreCall(ctx context.Context, serviceName, methodName string, args interface{}) (interface{}, error)
+	DoPostCall(ctx context.Context, serviceName, methodName string, args, reply interface{}) (interface{}, error)
 
-	DoPreWriteResponse(context.Context, *protocol.Message, *protocol.Message) error
+	DoPreWriteResponse(context.Context, *protocol.Message, *protocol.Message, error) error
 	DoPostWriteResponse(context.Context, *protocol.Message, *protocol.Message, error) error
 
 	DoPreWriteRequest(ctx context.Context) error
 	DoPostWriteRequest(ctx context.Context, r *protocol.Message, e error) error
+
+	DoHeartbeatRequest(ctx context.Context, req *protocol.Message) error
 }
 
 // Plugin is the server plugin interface.
@@ -77,9 +81,17 @@ type (
 		PreHandleRequest(ctx context.Context, r *protocol.Message) error
 	}
 
+	PreCallPlugin interface {
+		PreCall(ctx context.Context, serviceName, methodName string, args interface{}) (interface{}, error)
+	}
+
+	PostCallPlugin interface {
+		PostCall(ctx context.Context, serviceName, methodName string, args, reply interface{}) (interface{}, error)
+	}
+
 	//PreWriteResponsePlugin represents .
 	PreWriteResponsePlugin interface {
-		PreWriteResponse(context.Context, *protocol.Message, *protocol.Message) error
+		PreWriteResponse(context.Context, *protocol.Message, *protocol.Message, error) error
 	}
 
 	//PostWriteResponsePlugin represents .
@@ -95,6 +107,11 @@ type (
 	//PostWriteRequestPlugin represents .
 	PostWriteRequestPlugin interface {
 		PostWriteRequest(ctx context.Context, r *protocol.Message, e error) error
+	}
+
+	// HeartbeatPlugin is .
+	HeartbeatPlugin interface {
+		HeartbeatRequest(ctx context.Context, req *protocol.Message) error
 	}
 )
 
@@ -253,11 +270,41 @@ func (p *pluginContainer) DoPreHandleRequest(ctx context.Context, r *protocol.Me
 	return nil
 }
 
+// DoPreCall invokes PreCallPlugin plugin.
+func (p *pluginContainer) DoPreCall(ctx context.Context, serviceName, methodName string, args interface{}) (interface{}, error) {
+	var err error
+	for i := range p.plugins {
+		if plugin, ok := p.plugins[i].(PreCallPlugin); ok {
+			args, err = plugin.PreCall(ctx, serviceName, methodName, args)
+			if err != nil {
+				return args, err
+			}
+		}
+	}
+
+	return args, err
+}
+
+// DoPostCall invokes PostCallPlugin plugin.
+func (p *pluginContainer) DoPostCall(ctx context.Context, serviceName, methodName string, args, reply interface{}) (interface{}, error) {
+	var err error
+	for i := range p.plugins {
+		if plugin, ok := p.plugins[i].(PostCallPlugin); ok {
+			reply, err = plugin.PostCall(ctx, serviceName, methodName, args, reply)
+			if err != nil {
+				return reply, err
+			}
+		}
+	}
+
+	return reply, err
+}
+
 // DoPreWriteResponse invokes PreWriteResponse plugin.
-func (p *pluginContainer) DoPreWriteResponse(ctx context.Context, req *protocol.Message, res *protocol.Message) error {
+func (p *pluginContainer) DoPreWriteResponse(ctx context.Context, req *protocol.Message, res *protocol.Message, err error) error {
 	for i := range p.plugins {
 		if plugin, ok := p.plugins[i].(PreWriteResponsePlugin); ok {
-			err := plugin.PreWriteResponse(ctx, req, res)
+			err := plugin.PreWriteResponse(ctx, req, res, err)
 			if err != nil {
 				return err
 			}
@@ -300,6 +347,20 @@ func (p *pluginContainer) DoPostWriteRequest(ctx context.Context, r *protocol.Me
 	for i := range p.plugins {
 		if plugin, ok := p.plugins[i].(PostWriteRequestPlugin); ok {
 			err := plugin.PostWriteRequest(ctx, r, e)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// DoHeartbeatRequest invokes HeartbeatRequest plugin.
+func (p *pluginContainer) DoHeartbeatRequest(ctx context.Context, r *protocol.Message) error {
+	for i := range p.plugins {
+		if plugin, ok := p.plugins[i].(HeartbeatPlugin); ok {
+			err := plugin.HeartbeatRequest(ctx, r)
 			if err != nil {
 				return err
 			}
