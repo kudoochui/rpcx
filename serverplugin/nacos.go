@@ -21,7 +21,7 @@ type NacosRegisterPlugin struct {
 	// nacos server config
 	ServerConfig []constant.ServerConfig
 	Cluster      string
-	Tenant       string
+	Weight       float64
 
 	// Registered services
 	Services []string
@@ -56,9 +56,6 @@ func (p *NacosRegisterPlugin) Start() error {
 
 // Stop unregister all services.
 func (p *NacosRegisterPlugin) Stop() error {
-	close(p.dying)
-	<-p.done
-
 	_, ip, port, _ := util.ParseRpcxAddress(p.ServiceAddress)
 
 	for _, name := range p.Services {
@@ -75,13 +72,17 @@ func (p *NacosRegisterPlugin) Stop() error {
 			log.Errorf("faield to deregister %s: %v", name, err)
 		}
 	}
+
+	close(p.dying)
+	<-p.done
+
 	return nil
 }
 
 // Register handles registering event.
 // this service is registered at BASE/serviceName/thisIpAddress node
 func (p *NacosRegisterPlugin) Register(name string, rcvr interface{}, metadata string) (err error) {
-	if "" == strings.TrimSpace(name) {
+	if strings.TrimSpace(name) == "" {
 		return errors.New("Register service `name` can't be empty")
 	}
 
@@ -100,7 +101,7 @@ func (p *NacosRegisterPlugin) Register(name string, rcvr interface{}, metadata s
 		ServiceName: name,
 		Metadata:    meta,
 		ClusterName: p.Cluster,
-		Tenant:      p.Tenant,
+		Weight:      p.Weight,
 		Enable:      true,
 		Healthy:     true,
 		Ephemeral:   true,
@@ -122,11 +123,15 @@ func (p *NacosRegisterPlugin) RegisterFunction(serviceName, fname string, fn int
 }
 
 func (p *NacosRegisterPlugin) Unregister(name string) (err error) {
-	if "" == strings.TrimSpace(name) {
+	if strings.TrimSpace(name) == "" {
 		return errors.New("Unregister service `name` can't be empty")
 	}
 
 	_, ip, port, err := util.ParseRpcxAddress(p.ServiceAddress)
+	if err != nil {
+		log.Errorf("wrong address %s: %v", p.ServiceAddress, err)
+		return err
+	}
 
 	inst := vo.DeregisterInstanceParam{
 		Ip:          ip,

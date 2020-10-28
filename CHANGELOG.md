@@ -3,6 +3,17 @@
 ## 6.0 (developing)
 
 - support reflection
+- add kubernetes config example
+- improve nacos support
+- improve message.Encode performance
+- re-register services in etcd v3
+- avoid duplicated client creation
+- add SelectNodePlugin that can interrupt the Select method
+- support TcpCopy by TeePlugin
+- Change two methods' name of client plugin!
+- Broken API: add error parameter in `PreWriteResponse`(#486)
+- Broken API: change ReadTimeout/WriteTimeout to IdleTimeout
+
 
 ## 5.0 
 
@@ -39,7 +50,7 @@
 
 ## 3.1
 
-- Add http gateway: https://github.com/rpcx-ecosystem/rpcx-gateway
+- Add http gateway: https://github.com/rpcxio/rpcx-gateway
 - Add direct http invoke
 - Add bidirectional communication 
 - Add xgen tool to generate codes for services automatically
@@ -52,6 +63,6 @@ fix bugs.
 - Rewrite rpcx. It implements its protocol and won't implemented based on wrapper of go standard rpc lib
 - Add go tags for pluggable plugins
 - Add English document: https://github.com/smallnest/rpcx-programming
-- Add rpcx 3.0 examples: https://github.com/rpcx-ecosystem/rpcx-examples3
+- Add rpcx 3.0 examples: https://github.com/rpcxio/rpcx-examples
 
 rpcx 3.0 is not compatible with rpcx 2.0 and below

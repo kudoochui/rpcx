@@ -137,10 +137,8 @@ type Option struct {
 	RPCPath string
 	//ConnectTimeout sets timeout for dialing
 	ConnectTimeout time.Duration
-	// ReadTimeout sets readdeadline for underlying net.Conns
-	ReadTimeout time.Duration
-	// WriteTimeout sets writedeadline for underlying net.Conns
-	WriteTimeout time.Duration
+	// ReadTimeout sets max idle time for underlying net.Conns
+	IdleTimeout time.Duration
 
 	// BackupLatency is used for Failbackup mode. rpcx will sends another request if the first response doesn't return in BackupLatency time.
 	BackupLatency time.Duration
@@ -373,8 +371,10 @@ func (client *Client) SendRaw(ctx context.Context, r *protocol.Message) (map[str
 	client.pending[seq] = call
 	client.mutex.Unlock()
 
-	data := r.Encode()
-	_, err := client.Conn.Write(data)
+	data := r.EncodeSlicePointer()
+	_, err := client.Conn.Write(*data)
+	protocol.PutData(data)
+
 	if err != nil {
 		client.mutex.Lock()
 		call = client.pending[seq]
@@ -438,9 +438,9 @@ func convertRes2Raw(res *protocol.Message) (map[string]string, []byte, error) {
 		m[XMessageStatusType] = "Normal"
 	}
 
-	if res.CompressType() == protocol.Gzip {
-		m["Content-Encoding"] = "gzip"
-	}
+	// if res.CompressType() == protocol.Gzip {
+	// 	m["Content-Encoding"] = "gzip"
+	// }
 
 	m[XMeta] = urlencode(res.Metadata)
 	m[XSerializeType] = strconv.Itoa(int(res.SerializeType()))
@@ -534,9 +534,11 @@ func (client *Client) send(ctx context.Context, call *Call) {
 	if client.Plugins != nil {
 		client.Plugins.DoClientBeforeEncode(req)
 	}
-	data := req.Encode()
 
-	_, err := client.Conn.Write(data)
+	data := req.EncodeSlicePointer()
+	_, err := client.Conn.Write(*data)
+	protocol.PutData(data)
+
 	if err != nil {
 		client.mutex.Lock()
 		call = client.pending[seq]
@@ -563,8 +565,8 @@ func (client *Client) send(ctx context.Context, call *Call) {
 		}
 	}
 
-	if client.option.WriteTimeout != 0 {
-		client.Conn.SetWriteDeadline(time.Now().Add(client.option.WriteTimeout))
+	if client.option.IdleTimeout != 0 {
+		client.Conn.SetDeadline(time.Now().Add(client.option.IdleTimeout))
 	}
 
 }
@@ -574,8 +576,8 @@ func (client *Client) input() {
 
 	for err == nil {
 		var res = protocol.NewMessage()
-		if client.option.ReadTimeout != 0 {
-			client.Conn.SetReadDeadline(time.Now().Add(client.option.ReadTimeout))
+		if client.option.IdleTimeout != 0 {
+			client.Conn.SetDeadline(time.Now().Add(client.option.IdleTimeout))
 		}
 
 		err = res.Decode(client.r)

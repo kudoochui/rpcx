@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
@@ -55,6 +56,8 @@ var (
 	StartSendRequestContextKey = &contextKey{"start-send-request"}
 	// TagContextKey is used to record extra info in handling services. Its value is a map[string]interface{}
 	TagContextKey = &contextKey{"service-tag"}
+	// HttpConnContextKey is used to store http connection.
+	HttpConnContextKey = &contextKey{"http-conn"}
 )
 
 // Server is rpcx server that use TCP or UDP.
@@ -122,12 +125,12 @@ func (s *Server) Address() net.Addr {
 
 // ActiveClientConn returns active connections.
 func (s *Server) ActiveClientConn() []net.Conn {
-	result := make([]net.Conn, 0, len(s.activeConn))
 	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]net.Conn, 0, len(s.activeConn))
 	for clientConn := range s.activeConn {
 		result = append(result, clientConn)
 	}
-	s.mu.RUnlock()
 	return result
 }
 
@@ -154,8 +157,10 @@ func (s *Server) SendMessage(conn net.Conn, servicePath, serviceMethod string, m
 	req.Metadata = metadata
 	req.Payload = data
 
-	reqData := req.Encode()
-	_, err := conn.Write(reqData)
+	b := req.EncodeSlicePointer()
+	_, err := conn.Write(*b)
+	protocol.PutData(b)
+
 	s.Plugins.DoPostWriteRequest(ctx, req, err)
 	protocol.FreeMsg(req)
 	return err
@@ -378,14 +383,14 @@ func (s *Server) serveConn(conn net.Conn) {
 					res.SetCompressType(req.CompressType())
 				}
 				handleError(res, err)
-				data := res.Encode()
-
-				s.Plugins.DoPreWriteResponse(ctx, req, res)
-				conn.Write(data)
+				s.Plugins.DoPreWriteResponse(ctx, req, res, err)
+				data := res.EncodeSlicePointer()
+				_, err := conn.Write(*data)
+				protocol.PutData(data)
 				s.Plugins.DoPostWriteResponse(ctx, req, res, err)
 				protocol.FreeMsg(res)
 			} else {
-				s.Plugins.DoPreWriteResponse(ctx, req, nil)
+				s.Plugins.DoPreWriteResponse(ctx, req, nil, err)
 			}
 			protocol.FreeMsg(req)
 			// auth failed, closed the connection
@@ -400,9 +405,11 @@ func (s *Server) serveConn(conn net.Conn) {
 			defer atomic.AddInt32(&s.handlerMsgNum, -1)
 
 			if req.IsHeartbeat() {
+				s.Plugins.DoHeartbeatRequest(ctx, req)
 				req.SetMessageType(protocol.Response)
-				data := req.Encode()
-				conn.Write(data)
+				data := req.EncodeSlicePointer()
+				conn.Write(*data)
+				protocol.PutData(data)
 				return
 			}
 
@@ -418,7 +425,7 @@ func (s *Server) serveConn(conn net.Conn) {
 				log.Warnf("rpcx: failed to handle request: %v", err)
 			}
 
-			s.Plugins.DoPreWriteResponse(newCtx, req, res)
+			s.Plugins.DoPreWriteResponse(newCtx, req, res, err)
 			if !req.IsOneway() {
 				if len(resMetadata) > 0 { //copy meta in context to request
 					meta := res.Metadata
@@ -436,9 +443,9 @@ func (s *Server) serveConn(conn net.Conn) {
 				if len(res.Payload) > 1024 && req.CompressType() != protocol.None {
 					res.SetCompressType(req.CompressType())
 				}
-				data := res.Encode()
-				conn.Write(data)
-				//res.WriteTo(conn)
+				data := res.EncodeSlicePointer()
+				conn.Write(*data)
+				protocol.PutData(data)
 			}
 			s.Plugins.DoPostWriteResponse(newCtx, req, res, err)
 
@@ -524,10 +531,20 @@ func (s *Server) handleRequest(ctx context.Context, req *protocol.Message) (res 
 
 	replyv := argsReplyPools.Get(mtype.ReplyType)
 
+	argv, err = s.Plugins.DoPreCall(ctx, serviceName, methodName, argv)
+	if err != nil {
+		argsReplyPools.Put(mtype.ReplyType, replyv)
+		return handleError(res, err)
+	}
+
 	if mtype.ArgType.Kind() != reflect.Ptr {
 		err = service.call(ctx, mtype, reflect.ValueOf(argv).Elem(), reflect.ValueOf(replyv))
 	} else {
 		err = service.call(ctx, mtype, reflect.ValueOf(argv), reflect.ValueOf(replyv))
+	}
+
+	if err == nil {
+		replyv, err = s.Plugins.DoPostCall(ctx, serviceName, methodName, argv, replyv)
 	}
 
 	argsReplyPools.Put(mtype.ArgType, argv)
@@ -586,7 +603,11 @@ func (s *Server) handleRequestForFunction(ctx context.Context, req *protocol.Mes
 
 	replyv := argsReplyPools.Get(mtype.ReplyType)
 
-	err = service.callForFunction(ctx, mtype, reflect.ValueOf(argv), reflect.ValueOf(replyv))
+	if mtype.ArgType.Kind() != reflect.Ptr {
+		err = service.callForFunction(ctx, mtype, reflect.ValueOf(argv).Elem(), reflect.ValueOf(replyv))
+	} else {
+		err = service.callForFunction(ctx, mtype, reflect.ValueOf(argv), reflect.ValueOf(replyv))
+	}
 
 	argsReplyPools.Put(mtype.ArgType, argv)
 
@@ -696,6 +717,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		// wait all in-processing requests finish.
 		ticker := time.NewTicker(shutdownPollInterval)
 		defer ticker.Stop()
+	outer:
 		for {
 			if s.checkProcessMsg() {
 				break
@@ -703,7 +725,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				err = ctx.Err()
-				break
+				break outer
 			case <-ticker.C:
 			}
 		}
@@ -731,13 +753,50 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return err
 }
 
+// Restart restarts this server gracefully.
+// It starts a new rpcx server with the same port with SO_REUSEPORT socket option,
+// and shutdown this rpcx server gracefully.
+func (s *Server) Restart(ctx context.Context) error {
+	pid, err := s.startProcess()
+	if err != nil {
+		return err
+	}
+	log.Infof("restart a new rpcx server: %d", pid)
+
+	// TODO: is it necessary?
+	time.Sleep(3 * time.Second)
+	return s.Shutdown(ctx)
+}
+
+func (s *Server) startProcess() (int, error) {
+	argv0, err := exec.LookPath(os.Args[0])
+	if err != nil {
+		return 0, err
+	}
+
+	// Pass on the environment and replace the old count key with the new one.
+	var env []string
+	for _, v := range os.Environ() {
+		env = append(env, v)
+	}
+
+	var originalWD, _ = os.Getwd()
+	allFiles := append([]*os.File{os.Stdin, os.Stdout, os.Stderr})
+	process, err := os.StartProcess(argv0, os.Args, &os.ProcAttr{
+		Dir:   originalWD,
+		Env:   env,
+		Files: allFiles,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return process.Pid, nil
+}
+
 func (s *Server) checkProcessMsg() bool {
 	size := atomic.LoadInt32(&s.handlerMsgNum)
 	log.Info("need handle in-processing msg size:", size)
-	if size == 0 {
-		return true
-	}
-	return false
+	return size == 0
 }
 
 func (s *Server) closeDoneChanLocked() {

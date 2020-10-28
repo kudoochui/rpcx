@@ -19,8 +19,8 @@ import (
 )
 
 func (s *Server) startGateway(network string, ln net.Listener) net.Listener {
-	if network != "tcp" && network != "tcp4" && network != "tcp6" {
-		log.Infof("network is not tcp/tcp4/tcp6 so can not start gateway")
+	if network != "tcp" && network != "tcp4" && network != "tcp6" && network != "reuseport" {
+		// log.Infof("network is not tcp/tcp4/tcp6 so can not start gateway")
 		return ln
 	}
 
@@ -91,7 +91,7 @@ func (s *Server) closeHTTP1APIGateway(ctx context.Context) error {
 }
 
 func (s *Server) handleGatewayRequest(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
-	ctx := context.WithValue(r.Context(), RemoteConnContextKey, r.RemoteAddr) // notice: It is a string, different with TCP (net.Conn)
+	ctx := share.WithValue(r.Context(), RemoteConnContextKey, r.RemoteAddr) // notice: It is a string, different with TCP (net.Conn)
 	err := s.Plugins.DoPreReadRequest(ctx)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -100,9 +100,7 @@ func (s *Server) handleGatewayRequest(w http.ResponseWriter, r *http.Request, pa
 
 	if r.Header.Get(XServicePath) == "" {
 		servicePath := params.ByName("servicePath")
-		if strings.HasPrefix(servicePath, "/") {
-			servicePath = servicePath[1:]
-		}
+		servicePath = strings.TrimPrefix(servicePath, "/")
 		r.Header.Set(XServicePath, servicePath)
 	}
 	servicePath := r.Header.Get(XServicePath)
@@ -150,10 +148,10 @@ func (s *Server) handleGatewayRequest(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 
-	ctx = context.WithValue(ctx, StartRequestContextKey, time.Now().UnixNano())
+	ctx.SetValue(StartRequestContextKey, time.Now().UnixNano())
 	err = s.auth(ctx, req)
 	if err != nil {
-		s.Plugins.DoPreWriteResponse(ctx, req, nil)
+		s.Plugins.DoPreWriteResponse(ctx, req, nil, err)
 		wh.Set(XMessageStatusType, "Error")
 		wh.Set(XErrorMessage, err.Error())
 		w.WriteHeader(401)
@@ -176,7 +174,7 @@ func (s *Server) handleGatewayRequest(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 
-	s.Plugins.DoPreWriteResponse(newCtx, req, nil)
+	s.Plugins.DoPreWriteResponse(newCtx, req, nil, nil)
 	if len(resMetadata) > 0 { //copy meta in context to request
 		meta := res.Metadata
 		if meta == nil {
