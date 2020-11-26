@@ -4,7 +4,7 @@ import (
 	"context"
 	"net"
 
-	"github.com/smallnest/rpcx/protocol"
+	"github.com/kudoochui/rpcx/protocol"
 )
 
 // pluginContainer implements PluginContainer interface.

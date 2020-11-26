@@ -4,9 +4,9 @@ import (
 	"context"
 	"net"
 
-	"github.com/smallnest/rpcx/protocol"
-	"github.com/smallnest/rpcx/server"
-	"github.com/smallnest/rpcx/share"
+	"github.com/kudoochui/rpcx/protocol"
+	"github.com/kudoochui/rpcx/server"
+	"github.com/kudoochui/rpcx/share"
 	"go.opencensus.io/trace"
 )
 

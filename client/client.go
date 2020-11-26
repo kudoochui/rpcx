@@ -15,9 +15,9 @@ import (
 
 	opentracing "github.com/opentracing/opentracing-go"
 	circuit "github.com/rubyist/circuitbreaker"
-	"github.com/smallnest/rpcx/log"
-	"github.com/smallnest/rpcx/protocol"
-	"github.com/smallnest/rpcx/share"
+	"github.com/kudoochui/rpcx/log"
+	"github.com/kudoochui/rpcx/protocol"
+	"github.com/kudoochui/rpcx/share"
 	"go.opencensus.io/trace"
 )
 
@@ -536,7 +536,7 @@ func (client *Client) send(ctx context.Context, call *Call) {
 	}
 
 	data := req.EncodeSlicePointer()
-	_, err := client.Conn.Write(*data)
+	_, err := client.Conn.Write(*data)		//不写缓冲，直接写
 	protocol.PutData(data)
 
 	if err != nil {
@@ -580,7 +580,7 @@ func (client *Client) input() {
 			client.Conn.SetDeadline(time.Now().Add(client.option.IdleTimeout))
 		}
 
-		err = res.Decode(client.r)
+		err = res.Decode(client.r)	//读取消息并解码
 		if err != nil {
 			break
 		}
