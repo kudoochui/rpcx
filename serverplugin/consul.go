@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/libkv"
-	"github.com/docker/libkv/store"
-	"github.com/docker/libkv/store/consul"
 	metrics "github.com/rcrowley/go-metrics"
-	"github.com/kudoochui/rpcx/log"
+	"github.com/rpcxio/libkv"
+	"github.com/rpcxio/libkv/store"
+	"github.com/rpcxio/libkv/store/consul"
+	"github.com/smallnest/rpcx/log"
 )
 
 func init() {
@@ -32,7 +32,6 @@ type ConsulRegisterPlugin struct {
 	Metrics  metrics.Registry
 	// Registered services
 	Services       []string
-	servicesLock	sync.RWMutex
 	metasLock      sync.RWMutex
 	metas          map[string]string
 	UpdateInterval time.Duration
@@ -91,7 +90,6 @@ func (p *ConsulRegisterPlugin) Start() error {
 					}
 
 					//set this same metrics for all services at this server
-					p.servicesLock.RLock()
 					for _, name := range p.Services {
 						nodePath := fmt.Sprintf("%s/%s/%s", p.BasePath, name, p.ServiceAddress)
 						kvPaire, err := p.kv.Get(nodePath)
@@ -111,10 +109,9 @@ func (p *ConsulRegisterPlugin) Start() error {
 							for key, value := range extra {
 								v.Set(key, value)
 							}
-							p.kv.Put(nodePath, []byte(v.Encode()), &store.WriteOptions{TTL: p.UpdateInterval * 2})
+							_ = p.kv.Put(nodePath, []byte(v.Encode()), &store.WriteOptions{TTL: p.UpdateInterval * 2})
 						}
 					}
-					p.servicesLock.RUnlock()
 				}
 			}
 		}()
@@ -146,7 +143,7 @@ func (p *ConsulRegisterPlugin) Stop() error {
 			continue
 		}
 		if exist {
-			p.kv.Delete(nodePath)
+			_ = p.kv.Delete(nodePath)
 			log.Infof("delete path %s", nodePath, err)
 		}
 	}
@@ -213,9 +210,7 @@ func (p *ConsulRegisterPlugin) Register(name string, rcvr interface{}, metadata 
 		return err
 	}
 
-	p.servicesLock.Lock()
 	p.Services = append(p.Services, name)
-	p.servicesLock.Unlock()
 
 	p.metasLock.Lock()
 	if p.metas == nil {
@@ -231,6 +226,9 @@ func (p *ConsulRegisterPlugin) RegisterFunction(serviceName, fname string, fn in
 }
 
 func (p *ConsulRegisterPlugin) Unregister(name string) (err error) {
+	if len(p.Services) == 0 {
+		return nil
+	}
 	if strings.TrimSpace(name) == "" {
 		err = errors.New("Unregister service `name` can't be empty")
 		return
