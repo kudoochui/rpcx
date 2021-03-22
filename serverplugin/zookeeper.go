@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/libkv"
-	"github.com/docker/libkv/store/zookeeper"
+	"github.com/rpcxio/libkv"
+	"github.com/rpcxio/libkv/store/zookeeper"
 
-	"github.com/docker/libkv/store"
 	metrics "github.com/rcrowley/go-metrics"
-	"github.com/kudoochui/rpcx/log"
+	"github.com/rpcxio/libkv/store"
+	"github.com/smallnest/rpcx/log"
 )
 
 func init() {
@@ -33,7 +33,6 @@ type ZooKeeperRegisterPlugin struct {
 	Metrics  metrics.Registry
 	// Registered services
 	Services       []string
-	servicesLock	sync.RWMutex
 	metasLock      sync.RWMutex
 	metas          map[string]string
 	UpdateInterval time.Duration
@@ -91,7 +90,6 @@ func (p *ZooKeeperRegisterPlugin) Start() error {
 						extra["connections"] = fmt.Sprintf("%.2f", metrics.GetOrRegisterMeter("connections", p.Metrics).RateMean())
 					}
 					//set this same metrics for all services at this server
-					p.servicesLock.RLock()
 					for _, name := range p.Services {
 						nodePath := fmt.Sprintf("%s/%s/%s", p.BasePath, name, p.ServiceAddress)
 						kvPaire, err := p.kv.Get(nodePath)
@@ -114,7 +112,6 @@ func (p *ZooKeeperRegisterPlugin) Start() error {
 							p.kv.Put(nodePath, []byte(v.Encode()), &store.WriteOptions{TTL: p.UpdateInterval * 2})
 						}
 					}
-					p.servicesLock.RUnlock()
 				}
 			}
 		}()
@@ -208,15 +205,13 @@ func (p *ZooKeeperRegisterPlugin) Register(name string, rcvr interface{}, metada
 	}
 
 	nodePath = fmt.Sprintf("%s/%s/%s", p.BasePath, name, p.ServiceAddress)
-	err = p.kv.Put(nodePath, []byte(metadata), &store.WriteOptions{TTL: p.UpdateInterval * 2})
+	_, _, err = p.kv.AtomicPut(nodePath, []byte(metadata), nil, &store.WriteOptions{TTL: p.UpdateInterval * 2})
 	if err != nil {
 		log.Errorf("cannot create zk path %s: %v", nodePath, err)
 		return err
 	}
 
-	p.servicesLock.Lock()
 	p.Services = append(p.Services, name)
-	p.servicesLock.Unlock()
 
 	p.metasLock.Lock()
 	if p.metas == nil {
@@ -232,6 +227,10 @@ func (p *ZooKeeperRegisterPlugin) RegisterFunction(serviceName, fname string, fn
 }
 
 func (p *ZooKeeperRegisterPlugin) Unregister(name string) (err error) {
+	if len(p.Services) == 0 {
+		return nil
+	}
+
 	if strings.TrimSpace(name) == "" {
 		return errors.New("Register service `name` can't be empty")
 	}
